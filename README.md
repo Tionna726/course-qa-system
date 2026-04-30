@@ -4,6 +4,9 @@
 
 > 核心理念：**先诊断再设计**，让课件真正解决用户问题。
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Tionna726/course-qa-system?style=social)](https://github.com/Tionna726/course-qa-system)
+
 ---
 
 ## ✨ 特性
@@ -28,8 +31,29 @@
 
 ## 🚀 快速开始
 
-### 1. 引入脚本
+### 安装到 CodeBuddy
 
+1. 克隆仓库到本地：
+```bash
+git clone https://github.com/Tionna726/course-qa-system.git
+```
+
+2. 复制 `SKILL.md` 和 `js/` 目录到 CodeBuddy skills 目录：
+```bash
+# Windows
+mkdir "%USERPROFILE%\.codebuddy\skills\course-qa-system"
+copy SKILL.md "%USERPROFILE%\.codebuddy\skills\course-qa-system\"
+xcopy /E js "%USERPROFILE%\.codebuddy\skills\course-qa-system\scripts\"
+```
+
+### 在网页中使用
+
+1. 复制 `js/` 目录到你的项目：
+```bash
+cp -r js/* your-project/js/
+```
+
+2. 在 HTML 中引入脚本：
 ```html
 <!-- 划线管理器（必须首先加载） -->
 <script src="js/highlight-manager.js"></script>
@@ -41,17 +65,7 @@
 <script src="js/floating-question-box.js"></script>
 ```
 
-### 2. 可选配置
-
-```javascript
-document.addEventListener('DOMContentLoaded', () => {
-    // 配置 DeepSeek API
-    window.floatingQuestion = new FloatingQuestionBox({
-        defaultModel: 'deepseek-v4-flash',
-        storageKey: 'fq-questions'
-    });
-});
-```
+3. 查看 `examples/index.html` 获取完整示例。
 
 ---
 
@@ -96,16 +110,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ```
 course-qa-system/
-├── scripts/
-│   ├── highlight-manager.js   # 划线管理器（核心）
-│   ├── note-panel.js          # 笔记板块（独立）
-│   └── floating-question-box.js # DeepSeek 提问（独立）
-├── templates/
-│   └── course-template.html   # 课件模板
-├── references/
-│   ├── framework_guide.md     # 思维框架设计指南
-│   └── llm_api_reference.md   # LLM API 参考
-└── README.md
+├── SKILL.md                      # Skill 定义文件（CodeBuddy 用）
+├── README.md                     # 项目说明
+├── LICENSE                       # MIT 协议
+├── js/                          # JavaScript 模块
+│   ├── highlight-manager.js     # 划线管理器
+│   ├── note-panel.js            # 笔记面板
+│   └── floating-question-box.js # 提问框
+└── examples/                    # 示例代码
+    └── index.html               # 示例课件
 ```
 
 ---
@@ -128,7 +141,24 @@ course-qa-system/
 
 ---
 
-## 🔧 技术栈
+## 🔧 LLM 配置
+
+提问框支持接入 LLM API：
+
+1. 点击提问框的 ⚙️ 按钮
+2. 填入 API 地址、Key、模型名称
+3. 推荐使用 DeepSeek（免费可用）
+
+**预设选项**：
+- **DeepSeek**: `https://api.deepseek.com/chat/completions`
+- **OpenAI**: `https://api.openai.com/v1/chat/completions`
+- **OneAPI**: `http://localhost:3000/v1/chat/completions`
+
+**注意**：浏览器直接调用 API 可能遇到 CORS 跨域问题，建议使用代理服务。
+
+---
+
+## 🛠️ 技术栈
 
 - **前端**：原生 JavaScript（无框架依赖）
 - **存储**：localStorage（本地持久化）
@@ -193,7 +223,8 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 ## 📧 联系方式
 
 - 作者：Tiona
-- 项目主页：https://github.com/你的用户名/course-qa-system
+- 项目主页：[https://github.com/Tionna726/course-qa-system](https://github.com/Tionna726/course-qa-system)
+- 问题反馈：[Issues](https://github.com/Tionna726/course-qa-system/issues)
 
 ---
 
