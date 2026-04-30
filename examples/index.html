@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course QA System - 示例课件</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+        }
+        h1 { color: #2d3436; margin-bottom: 10px; }
+        h2 { color: #636e72; margin-top: 30px; margin-bottom: 15px; }
+        p { margin-bottom: 15px; }
+        .chapter {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .highlight-demo {
+            background: #ffeaa7;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .tip {
+            background: #dff9fb;
+            border-left: 4px solid #00cec9;
+            padding: 12px 16px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        code {
+            background: #fab1a0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        pre {
+            background: #2d3436;
+            color: #dfe6e9;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>📚 Course QA System 示例课件</h1>
+    <p style="color: #636e72;">这是一个演示课件，展示 course-qa-system 的三大功能模块。</p>
+
+    <div class="tip">
+        <strong>💡 快速开始：</strong><br>
+        • 选中文字 → 右键 → 选择操作（划线/笔记/提问）<br>
+        • 按 <code>N</code> 键打开笔记面板<br>
+        • 按 <code>Q</code> 键打开提问面板
+    </div>
+
+    <div class="chapter">
+        <h2>第一章：划线功能演示</h2>
+        <p>
+            请<span class="highlight-demo">选中这段文字</span>，然后点击右键，
+            你会看到三个选项：划线高亮、划线+笔记、划线+提问。
+        </p>
+        <p>
+            划线功能可以帮你<span class="highlight-demo">标记重点内容</span>，
+            所有划线都会自动保存到浏览器本地存储中。
+        </p>
+    </div>
+
+    <div class="chapter">
+        <h2>第二章：笔记功能</h2>
+        <p>
+            按 <code>N</code> 键可以打开笔记面板。笔记是独立的功能模块，
+            与提问功能完全分开。
+        </p>
+        <p>
+            你可以在笔记中记录学习心得、总结要点、或者提出疑问。
+            笔记支持标题、内容和上下文关联。
+        </p>
+    </div>
+
+    <div class="chapter">
+        <h2>第三章：智能提问</h2>
+        <p>
+            按 <code>Q</code> 键可以打开提问面板。如果你选中了文字，
+            系统会自动将选中的内容作为上下文发送给 AI。
+        </p>
+        <p>
+            提问功能使用<span class="highlight-demo">专家视角</span>的 Prompt 设计，
+            不会用"小白口吻"解释，而是保留专业术语，
+            帮助学员建立真正的专业认知结构。
+        </p>
+    </div>
+
+    <div class="chapter">
+        <h2>附录：思维框架设计方法论</h2>
+        <h3>纵向拆解</h3>
+        <pre>代码层：具体实现
+    ↓
+模块层：功能模块
+    ↓
+系统层：系统架构
+    ↓
+架构层：设计范式
+    ↓
+范式层：问题本质</pre>
+
+        <h3>横向关联</h3>
+        <p>看一个概念时，同时问四个问题：</p>
+        <ul style="margin-left: 20px;">
+            <li><strong>它和什么相邻？</strong> → 找到概念家族</li>
+            <li><strong>它替代了什么？</strong> → 理解演进逻辑</li>
+            <li><strong>它依赖什么？</strong> → 理清依赖关系</li>
+            <li><strong>在别的领域叫什么？</strong> → 建立跨域映射</li>
+        </ul>
+
+        <div class="tip">
+            <strong>🎯 核心命题：</strong><br>
+            顶层思维 = 在发散与收束之间重建可生长的认知结构。<br>
+            不是站位高、看大局，而是面对问题时能立刻判断：
+            我现在卡在哪一层？
+        </div>
+    </div>
+
+    <!-- 引入 Course QA System 脚本 -->
+    <script src="../js/highlight-manager.js"></script>
+    <script src="../js/note-panel.js"></script>
+    <script src="../js/floating-question-box.js"></script>
+
+    <script>
+        // 可选：配置 DeepSeek API
+        document.addEventListener('DOMContentLoaded', () => {
+            // 如果需要使用 DeepSeek 提问功能，请配置 API Key
+            // window.floatingQuestion = new FloatingQuestionBox({
+            //     defaultModel: 'deepseek-v4-flash',
+            //     storageKey: 'fq-questions'
+            // });
+        });
+    </script>
+</body>
+</html>
