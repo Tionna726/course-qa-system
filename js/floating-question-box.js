@@ -1,76 +1,166 @@
 /**
- * DeepSeek 提问框系统 v2.0
+ * DeepSeek 提问框系统 v2.1
+ *
+ * 功能：
  * - 独立提问板块（与笔记分开）
  * - 划线提问：选中文字 → 右键 → "划线提问"
  * - DeepSeek 智能回答
+ * - 专家视角 Prompt 设计
+ *
+ * 安全修复：
+ * - API Key 使用 sessionStorage 存储
+ * - 继承 BaseModule，使用 escapeHtml 转义
+ * - 监听 CustomEvent 接收划线事件
+ * - 所有错误添加 Toast 通知
  */
 
-class FloatingQuestionBox {
+/**
+ * 提问框类
+ * @class
+ */
+class FloatingQuestionBox extends BaseModule {
+    /**
+     * @param {Object} options - 配置选项
+     * @param {string} [options.storageKey='fq-questions'] - 存储键
+     * @param {string} [options.defaultModel='deepseek-v4-flash'] - 默认模型
+     */
     constructor(options = {}) {
-        this.options = {
+        super({
             storageKey: 'fq-questions',
             defaultModel: 'deepseek-v4-flash',
-            autoSaveHighlights: true,
             ...options
-        };
+        });
 
-        this.questions = [];
+        /** @type {Object|null} 当前问题 */
         this.currentQuestion = null;
+        /** @type {boolean} 拖动状态 */
         this.isDragging = false;
+        /** @type {boolean} 最小化状态 */
         this.isMinimized = false;
 
-        // LLM 配置
+        /** @type {Object} LLM 配置 */
         this.llmConfig = {
             enabled: false,
             apiUrl: '',
             apiKey: '',
-            model: this.options.defaultModel
+            model: options.defaultModel || 'deepseek-v4-flash'
         };
 
         this.loadConfig();
-        this.loadQuestions();
+        this.loadData();
         this.init();
     }
 
-    // 加载问题
+    /**
+     * 加载问题
+     * @returns {Object[]} 问题列表
+     */
     loadQuestions() {
+        const result = this.loadData();
+        if (result === null) {
+            this.data = [];
+        }
+        return this.data;
+    }
+
+    /**
+     * 保存问题
+     */
+    saveQuestions() {
+        this.saveData();
+    }
+
+    /**
+     * 加载配置（使用 sessionStorage 存储敏感信息）
+     */
+    loadConfig() {
         try {
-            const saved = localStorage.getItem(this.options.storageKey);
-            if (saved) this.questions = JSON.parse(saved);
+            // API Key 从 sessionStorage 加载
+            const keySaved = sessionStorage.getItem('fq-llm-api-key');
+            const configSaved = localStorage.getItem('fq-llm-config');
+
+            if (configSaved) {
+                const config = JSON.parse(configSaved);
+                this.llmConfig = {
+                    ...this.llmConfig,
+                    enabled: config.enabled || false,
+                    apiUrl: config.apiUrl || '',
+                    model: config.model || this.options.defaultModel
+                };
+            }
+
+            if (keySaved) {
+                this.llmConfig.apiKey = keySaved;
+            }
         } catch (e) {
-            this.questions = [];
+            console.error('[FloatingQuestionBox] loadConfig error:', e);
+            this.showToast('配置加载失败', 'error');
         }
     }
 
-    // 保存问题
-    saveQuestions() {
-        localStorage.setItem(this.options.storageKey, JSON.stringify(this.questions));
-    }
-    
-    // 加载配置
-    loadConfig() {
+    /**
+     * 保存配置（敏感信息分离存储）
+     */
+    saveConfig() {
         try {
-            const saved = localStorage.getItem('fq-llm-config');
-            if (saved) {
-                this.llmConfig = { ...this.llmConfig, ...JSON.parse(saved) };
+            // API Key 存储在 sessionStorage（会话级）
+            if (this.llmConfig.apiKey) {
+                sessionStorage.setItem('fq-llm-api-key', this.llmConfig.apiKey);
+            } else {
+                sessionStorage.removeItem('fq-llm-api-key');
             }
+
+            // 其他配置存储在 localStorage
+            const publicConfig = {
+                enabled: this.llmConfig.enabled,
+                apiUrl: this.llmConfig.apiUrl,
+                model: this.llmConfig.model
+            };
+            localStorage.setItem('fq-llm-config', JSON.stringify(publicConfig));
         } catch (e) {
-            console.log('无保存的LLM配置');
+            this.showToast('配置保存失败', 'error');
+            console.error('[FloatingQuestionBox] saveConfig error:', e);
         }
     }
-    
-    // 保存配置
-    saveConfig() {
-        localStorage.setItem('fq-llm-config', JSON.stringify(this.llmConfig));
-    }
-    
+
+    /**
+     * 初始化
+     */
     init() {
         this.createQuestionBox();
         this.setupKeyboardShortcuts();
         this.renderQuestions();
+        this.setupEventListeners();
+        this.applyTheme();
     }
 
-    // 显示新问题输入框（供外部调用，如划线后）
+    /**
+     * 设置事件监听
+     */
+    setupEventListeners() {
+        // 监听划线事件
+        window.addEventListener('highlight-with-question', (e) => {
+            this.showNewQuestion(e.detail.text);
+        });
+
+        // 监听主题切换
+        window.addEventListener('theme-changed', (e) => {
+            this.applyTheme(e.detail?.theme);
+        });
+    }
+
+    /**
+     * 应用主题
+     * @param {string} [theme]
+     */
+    applyTheme(theme) {
+        // 样式已在 CSS 中处理
+    }
+
+    /**
+     * 显示新问题输入框（供外部调用，如划线后）
+     * @param {string} [contextText=''] - 上下文文本
+     */
     showNewQuestion(contextText = '') {
         document.getElementById('fq-context-text').textContent = contextText;
         document.getElementById('fq-empty').style.display = 'none';
@@ -79,12 +169,15 @@ class FloatingQuestionBox {
         document.getElementById('fq-input').focus();
         this.currentQuestion = { context: contextText };
     }
-    
-    // 创建提问框
+
+    /**
+     * 创建提问框
+     */
     createQuestionBox() {
         // 提问框容器
         this.box = document.createElement('div');
         this.box.id = 'floating-question-box';
+        this.box.className = 'fq-panel';
         this.box.innerHTML = `
             <div class="fq-header" id="fq-header">
                 <div class="fq-title">
@@ -93,6 +186,7 @@ class FloatingQuestionBox {
                     <span class="fq-count" id="fq-count">0</span>
                 </div>
                 <div class="fq-actions">
+                    <button class="fq-theme-toggle" id="fq-theme" title="切换主题">🌓</button>
                     <button class="fq-btn" id="fq-new" title="新建提问">➕</button>
                     <button class="fq-btn" id="fq-settings" title="LLM设置">⚙️</button>
                     <button class="fq-btn" id="fq-export" title="导出">📤</button>
@@ -101,7 +195,7 @@ class FloatingQuestionBox {
                 </div>
             </div>
             <div class="fq-content" id="fq-content">
-                <div class="fq-help" id="fq-help" style="display:none; padding: 10px; background: rgba(102,126,234,0.15); border-radius: 8px; margin-bottom: 10px; font-size: 12px; color: rgba(255,255,255,0.8);">
+                <div class="fq-help" id="fq-help" style="display:none; padding: 10px; background: rgba(102,126,234,0.15); border-radius: 8px; margin-bottom: 10px; font-size: 12px; color: var(--fq-text-secondary);">
                     <strong>💡 提问方式：</strong><br>
                     1. 选中文字 → 右键"划线提问"<br>
                     2. 或点击 ➕ 直接提问<br>
@@ -129,346 +223,97 @@ class FloatingQuestionBox {
             </div>
         `;
         document.body.appendChild(this.box);
-        
+
         // 初始化样式和事件
         this.initStyles();
         this.bindEvents();
-        
+
         // 拖动功能
         this.box.style.left = '20px';
         this.box.style.top = '150px';
     }
-    
-    // 初始化样式（内联）
+
+    /**
+     * 初始化样式（仅添加面板特定样式）
+     */
     initStyles() {
+        // 已在 css/styles.css 中定义通用样式
+        // 此处仅添加面板特定样式
+        if (document.getElementById('fq-panel-styles')) return;
+
         const style = document.createElement('style');
+        style.id = 'fq-panel-styles';
         style.textContent = `
             #floating-question-box {
-                position: fixed;
                 left: 20px;
                 top: 150px;
                 width: 320px;
                 max-height: 500px;
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                border-radius: 16px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.1);
-                z-index: 10000;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                overflow: hidden;
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
             }
-            
-            #floating-question-box:hover {
-                box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.15);
+
+            #fq-context-text {
+                white-space: pre-wrap;
+                word-break: break-word;
             }
-            
-            #floating-question-box.minimized {
-                max-height: 48px;
-            }
-            
-            #floating-question-box.minimized .fq-content,
-            #floating-question-box.minimized .fq-new-question {
-                display: none;
-            }
-            
-            .fq-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px 16px;
-                background: rgba(255,255,255,0.05);
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-                cursor: move;
-                user-select: none;
-            }
-            
-            .fq-title {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            
-            .fq-icon {
-                font-size: 18px;
-            }
-            
-            .fq-title-text {
-                color: #fff;
-                font-weight: 600;
-                font-size: 14px;
-            }
-            
-            .fq-count {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: #fff;
-                font-size: 11px;
-                padding: 2px 8px;
-                border-radius: 10px;
-                font-weight: 600;
-            }
-            
-            .fq-actions {
-                display: flex;
-                gap: 4px;
-            }
-            
-            .fq-btn {
-                width: 28px;
-                height: 28px;
-                border: none;
-                background: rgba(255,255,255,0.1);
-                color: #fff;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 12px;
-                transition: background 0.2s;
-            }
-            
-            .fq-btn:hover {
-                background: rgba(255,255,255,0.2);
-            }
-            
-            .fq-btn-close:hover {
-                background: #e74c3c;
-            }
-            
-            /* 移动端适配 */
-            @media (max-width: 768px) {
-                #floating-question-box {
-                    left: 10px !important;
-                    right: 10px !important;
-                    width: auto !important;
-                    max-width: calc(100vw - 20px);
-                    max-height: 60vh;
-                }
-                
-                #fq-settings-panel {
-                    left: 10px !important;
-                    right: 10px !important;
-                    width: auto !important;
-                }
-            }
-            
-            .fq-content {
-                max-height: 350px;
-                overflow-y: auto;
-                padding: 12px;
-            }
-            
-            .fq-empty {
-                text-align: center;
-                padding: 32px 16px;
-                color: rgba(255,255,255,0.6);
-            }
-            
-            .fq-empty-icon {
-                font-size: 32px;
-                margin-bottom: 12px;
-            }
-            
-            .fq-empty-text {
-                font-size: 14px;
-                margin-bottom: 8px;
-            }
-            
-            .fq-empty-hint {
-                font-size: 12px;
-                color: rgba(255,255,255,0.4);
-            }
-            
-            .fq-list {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            
-            .fq-question-item {
-                background: rgba(255,255,255,0.05);
-                border-radius: 10px;
-                padding: 12px;
-                border-left: 3px solid #667eea;
-                cursor: pointer;
-                transition: all 0.2s;
-            }
-            
-            .fq-question-item:hover {
-                background: rgba(255,255,255,0.1);
-                transform: translateX(4px);
-            }
-            
-            .fq-question-item.answered {
-                border-left-color: #2ecc71;
-            }
-            
-            .fq-question-context {
-                font-size: 12px;
-                color: rgba(255,255,255,0.5);
-                margin-bottom: 6px;
-                padding: 6px 8px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 4px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            
-            .fq-question-text {
-                color: #fff;
-                font-size: 13px;
-                line-height: 1.5;
-            }
-            
-            .fq-question-meta {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-top: 8px;
-                font-size: 11px;
-                color: rgba(255,255,255,0.4);
-            }
-            
-            .fq-new-question {
-                display: none;
-                padding: 16px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-                background: rgba(0,0,0,0.2);
-            }
-            
-            .fq-new-question.active {
-                display: block;
-            }
-            
-            .fq-context {
-                margin-bottom: 12px;
-            }
-            
-            .fq-context-label {
-                font-size: 11px;
-                color: rgba(255,255,255,0.5);
-                margin-bottom: 4px;
-            }
-            
-            .fq-context-text {
-                color: #fff;
-                font-size: 13px;
-                padding: 8px;
-                background: rgba(255,255,255,0.1);
-                border-radius: 6px;
-                border-left: 3px solid #f39c12;
-                max-height: 80px;
-                overflow-y: auto;
-            }
-            
-            .fq-input-area textarea {
-                width: 100%;
-                padding: 10px 12px;
-                background: rgba(255,255,255,0.1);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 8px;
-                color: #fff;
-                font-size: 13px;
-                font-family: inherit;
-                resize: none;
-                box-sizing: border-box;
-            }
-            
-            .fq-input-area textarea:focus {
-                outline: none;
-                border-color: #667eea;
-            }
-            
-            .fq-input-area textarea::placeholder {
-                color: rgba(255,255,255,0.4);
-            }
-            
-            .fq-input-actions {
-                display: flex;
-                gap: 8px;
-                margin-top: 10px;
-            }
-            
-            .fq-btn-submit {
-                flex: 1;
-                padding: 8px 16px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border: none;
-                border-radius: 6px;
-                color: #fff;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: transform 0.2s, opacity 0.2s;
-            }
-            
-            .fq-btn-submit:hover {
-                transform: scale(1.02);
-            }
-            
-            .fq-btn-cancel {
-                padding: 8px 16px;
-                background: rgba(255,255,255,0.1);
-                border: none;
-                border-radius: 6px;
-                color: rgba(255,255,255,0.7);
-                font-size: 13px;
-                cursor: pointer;
-            }
-            
-            .fq-btn-cancel:hover {
-                background: rgba(255,255,255,0.2);
+
+            .fq-answer {
+                white-space: pre-wrap;
+                word-break: break-word;
             }
         `;
         document.head.appendChild(style);
     }
-    
-    // 绑定事件
+
+    /**
+     * 绑定事件
+     */
     bindEvents() {
         // 拖动功能
         const header = document.getElementById('fq-header');
         header.addEventListener('mousedown', (e) => {
-            if (e.target.classList.contains('fq-btn')) return;
+            if (e.target.classList.contains('fq-btn') || e.target.classList.contains('fq-theme-toggle')) return;
             this.isDragging = true;
             this.offsetX = e.clientX - this.box.getBoundingClientRect().left;
             this.offsetY = e.clientY - this.box.getBoundingClientRect().top;
             this.box.style.cursor = 'grabbing';
         });
-        
+
         document.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
             let newX = e.clientX - this.offsetX;
             let newY = e.clientY - this.offsetY;
-            
+
             // 边界限制
             newX = Math.max(0, Math.min(newX, window.innerWidth - 320));
             newY = Math.max(0, Math.min(newY, window.innerHeight - 48));
-            
+
             this.box.style.left = newX + 'px';
             this.box.style.top = newY + 'px';
         });
-        
+
         document.addEventListener('mouseup', () => {
             this.isDragging = false;
             this.box.style.cursor = '';
         });
-        
+
         // 按钮事件
-        document.getElementById('fq-new').addEventListener('click', () => this.showNewQuestion());
-        document.getElementById('fq-settings').addEventListener('click', () => this.showSettings());
-        document.getElementById('fq-export').addEventListener('click', () => this.exportQuestions());
-        document.getElementById('fq-minimize').addEventListener('click', () => {
+        document.getElementById('fq-theme').onclick = () => this.toggleTheme();
+        document.getElementById('fq-new').onclick = () => this.showNewQuestion();
+        document.getElementById('fq-settings').onclick = () => this.showSettings();
+        document.getElementById('fq-export').onclick = () => this.exportQuestions();
+        document.getElementById('fq-minimize').onclick = () => {
             this.isMinimized = !this.isMinimized;
             this.box.classList.toggle('minimized', this.isMinimized);
-        });
-        document.getElementById('fq-close').addEventListener('click', () => this.hide());
-        document.getElementById('fq-submit').addEventListener('click', () => this.submitQuestion());
-        document.getElementById('fq-cancel').addEventListener('click', () => this.hideNewQuestion());
-        document.getElementById('fq-input').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && e.ctrlKey) this.submitQuestion();
-        });
+        };
+        document.getElementById('fq-close').onclick = () => this.hide();
+        document.getElementById('fq-submit').onclick = () => this.submitQuestion();
+        document.getElementById('fq-cancel').onclick = () => this.hideNewQuestion();
 
-        // 监听划线事件（来自 highlight-manager）
-        window.addEventListener('highlight-created', (e) => {
-            this.showNewQuestion(e.detail.highlight.text);
+        document.getElementById('fq-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                this.submitQuestion();
+            }
         });
 
         // 显示/隐藏快捷键
@@ -497,54 +342,67 @@ class FloatingQuestionBox {
     hide() {
         this.box.style.display = 'none';
     }
-    
-    // 隐藏新问题输入框
+
+    /**
+     * 隐藏新问题输入框
+     */
     hideNewQuestion() {
         document.getElementById('fq-new-question').classList.remove('active');
         document.getElementById('fq-input').value = '';
-        
-        if (this.questions.length > 0) {
+
+        if (this.data.length > 0) {
             document.getElementById('fq-empty').style.display = 'none';
             document.getElementById('fq-list').style.display = 'flex';
         } else {
             document.getElementById('fq-empty').style.display = 'block';
             document.getElementById('fq-list').style.display = 'none';
         }
-        
+
         this.currentQuestion = null;
     }
-    
-    // 提交问题
+
+    /**
+     * 提交问题
+     */
     submitQuestion() {
         const input = document.getElementById('fq-input');
         const questionText = input.value.trim();
-        if (!questionText) return;
+
+        if (!questionText) {
+            this.showToast('请输入问题', 'warning');
+            return;
+        }
 
         const question = {
-            id: Date.now(),
+            id: this.generateId(),
             context: this.currentQuestion?.context || '',
-            question: questionText,
+            question: this.escapeHtml(questionText),
             answered: false,
             answer: null,
             timestamp: new Date().toISOString()
         };
 
-        this.questions.unshift(question);
+        this.data.unshift(question);
         this.saveQuestions();
         this.renderQuestions();
         this.hideNewQuestion();
         this.handleAnswer(question);
     }
-    
-    // 如果配置了LLM，显示帮助提示
+
+    /**
+     * 如果配置了LLM，显示帮助提示
+     */
     showHelpIfNeeded() {
         const help = document.getElementById('fq-help');
         if (help && this.llmConfig.enabled && this.llmConfig.apiKey) {
             help.style.display = 'block';
         }
     }
-    
-    // 处理回答（LLM或固定话术）
+
+    /**
+     * 处理回答（LLM或固定话术）
+     * @param {Object} question - 问题对象
+     */
     async handleAnswer(question) {
         if (this.llmConfig.enabled && this.llmConfig.apiUrl) {
             await this.callLLM(question);
@@ -552,30 +410,37 @@ class FloatingQuestionBox {
             this.showFixedAnswer(question);
         }
     }
-    
-    // 显示固定话术
+
+    /**
+     * 显示固定话术
+     * @param {Object} question - 问题对象
+     */
     showFixedAnswer(question) {
         question.answered = true;
-        question.answer = '💡 这个问题很有价值！请在答疑课上集中讨论，或联系讲师获取详细解答。';
+        question.answer = '💡 这个问题很有价值！请在答疑课上集中讨论，或联系讲师获取详细解答。\n\n💡 提示：配置 LLM API 可以获得智能回答哦~';
         this.renderQuestions();
     }
-    
-    // 调用 LLM API
+
+    /**
+     * 调用 LLM API
+     * @param {Object} question - 问题对象
+     */
     async callLLM(question) {
         const loadingAnswer = '🤖 正在思考中...\n(首次调用可能需要3-5秒)';
         question.answer = loadingAnswer;
         this.renderQuestions();
-        
+
         // 检查配置
         if (!this.llmConfig.apiKey) {
             question.answer = '❌ 请先填写 API Key！\n\n点击 ⚙️ 按钮，填入你的 DeepSeek API Key。';
             this.renderQuestions();
+            this.showToast('请先配置 API Key', 'warning');
             return;
         }
-        
+
         try {
             const prompt = this.buildPrompt(question);
-            
+
             const response = await fetch(this.llmConfig.apiUrl, {
                 method: 'POST',
                 headers: {
@@ -588,50 +453,57 @@ class FloatingQuestionBox {
                     temperature: 0.7
                 })
             });
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`API 请求失败 (${response.status}): ${errorText.substring(0, 200)}`);
             }
-            
-            const data = await response.json();
-            
+
+            const result = await response.json();
+
             // 兼容不同 API 格式
             let answer = null;
-            if (data.choices?.[0]?.message?.content) {
-                // OpenAI 格式
-                answer = data.choices[0].message.content;
-            } else if (data.response) {
-                // 兼容某些国内 API
-                answer = data.response;
-            } else if (data.result) {
-                // 另一种格式
-                answer = data.result;
+            if (result.choices?.[0]?.message?.content) {
+                answer = result.choices[0].message.content;
+            } else if (result.response) {
+                answer = result.response;
+            } else if (result.result) {
+                answer = result.result;
             }
-            
+
             if (answer) {
                 question.answer = answer;
                 question.answered = true;
+                this.showToast('回答已生成', 'success');
             } else {
                 question.answer = '⚠️ 未能解析 API 响应，请查看控制台日志';
+                this.showToast('响应解析失败', 'error');
             }
         } catch (error) {
             let errorMsg = `❌ 调用失败: ${error.message}`;
-            
+
             if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
                 errorMsg += '\n\n💡 可能原因:';
                 errorMsg += '\n• CORS 跨域限制（浏览器安全策略）';
                 errorMsg += '\n• API 地址无法访问';
                 errorMsg += '\n• 请使用 OneAPI 等代理服务';
+                this.showToast('网络错误，请检查配置', 'error');
+            } else {
+                this.showToast('API 调用失败', 'error');
             }
-            
+
             question.answer = errorMsg;
         }
-        
+
+        this.saveQuestions();
         this.renderQuestions();
     }
-    
-    // 构建提示词（专家视角，非小白口吻）
+
+    /**
+     * 构建提示词（专家视角，非小白口吻）
+     * @param {Object} question - 问题对象
+     * @returns {string} 提示词
+     */
     buildPrompt(question) {
         return `你是本课程领域的专家导师。请用专家视角回答，保留关键术语，不要使用"小白口吻"或通俗类比。
 
@@ -649,15 +521,17 @@ ${question.question}
 
 注意：不要使用"就像..."这类通俗类比，保留专业术语。`;
     }
-    
-    // 显示设置面板
+
+    /**
+     * 显示设置面板
+     */
     showSettings() {
         const existing = document.getElementById('fq-settings-panel');
         if (existing) {
             existing.remove();
             return;
         }
-        
+
         const panel = document.createElement('div');
         panel.id = 'fq-settings-panel';
         panel.innerHTML = `
@@ -670,119 +544,63 @@ ${question.question}
                     <input type="checkbox" id="fq-llm-enabled" ${this.llmConfig.enabled ? 'checked' : ''}>
                     <span>启用 LLM 智能回答</span>
                 </label>
-                
+
                 <div class="fq-settings-field">
                     <label>快速选择</label>
-                    <select id="fq-preset" style="width:100%; padding:8px 12px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fff; font-size:13px;">
+                    <select id="fq-preset" style="width:100%; padding:8px 12px; background:var(--fq-bg-tertiary); border:1px solid var(--fq-border); border-radius:6px; color:var(--fq-text-primary); font-size:13px;">
                         <option value="">-- 选择服务商 --</option>
                         <option value="deepseek">DeepSeek</option>
                         <option value="openai">OpenAI</option>
                         <option value="oneapi">OneAPI / 国内代理</option>
                     </select>
                 </div>
-                
+
                 <div class="fq-settings-field">
                     <label>API 地址</label>
-                    <input type="text" id="fq-llm-url" placeholder="https://api.deepseek.com/chat/completions" value="${this.llmConfig.apiUrl || ''}">
+                    <input type="text" id="fq-llm-url" placeholder="https://api.deepseek.com/chat/completions" value="${this.escapeHtml(this.llmConfig.apiUrl || '')}">
                 </div>
                 <div class="fq-settings-field">
-                    <label>API Key</label>
-                    <input type="password" id="fq-llm-key" placeholder="sk-..." value="${this.llmConfig.apiKey || ''}">
+                    <label>API Key（会话级存储）</label>
+                    <input type="password" id="fq-llm-key" placeholder="sk-..." value="${this.escapeHtml(this.llmConfig.apiKey || '')}">
+                    <small style="color: var(--fq-text-muted); font-size: 11px; margin-top: 4px; display: block;">API Key 仅保存在本次会话，关闭标签页后自动清除</small>
                 </div>
                 <div class="fq-settings-field">
                     <label>模型名称</label>
-                    <input type="text" id="fq-llm-model" placeholder="deepseek-v4-flash" value="${this.llmConfig.model || 'deepseek-v4-flash'}">
+                    <input type="text" id="fq-llm-model" placeholder="deepseek-v4-flash" value="${this.escapeHtml(this.llmConfig.model || 'deepseek-v4-flash')}">
                 </div>
                 <button class="fq-settings-save" id="fq-settings-save">保存设置</button>
             </div>
         `;
-        
+
         panel.style.cssText = `
             position: fixed;
             right: 20px;
             top: 150px;
             width: 300px;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            background: linear-gradient(135deg, var(--fq-bg-primary) 0%, var(--fq-bg-secondary) 100%);
+            border-radius: var(--fq-radius-lg);
+            box-shadow: 0 8px 32px var(--fq-shadow);
             z-index: 10002;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
         `;
-        
-        const panelStyle = document.createElement('style');
-        panelStyle.id = 'fq-settings-panel-style';
-        panelStyle.textContent = `
-            #fq-settings-panel .fq-settings-title {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 12px 16px;
-                background: rgba(255,255,255,0.05);
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-                color: #fff;
-                font-weight: 600;
-                font-size: 14px;
-            }
-            #fq-settings-panel .fq-settings-close { cursor: pointer; opacity: 0.7; }
-            #fq-settings-panel .fq-settings-close:hover { opacity: 1; }
-            #fq-settings-panel .fq-settings-content { padding: 16px; }
-            #fq-settings-panel .fq-settings-label {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                color: #fff;
-                font-size: 13px;
-                cursor: pointer;
-                margin-bottom: 16px;
-            }
-            #fq-settings-panel .fq-settings-field { margin-bottom: 12px; }
-            #fq-settings-panel .fq-settings-field label {
-                display: block;
-                color: rgba(255,255,255,0.7);
-                font-size: 12px;
-                margin-bottom: 6px;
-            }
-            #fq-settings-panel .fq-settings-field input {
-                width: 100%;
-                padding: 8px 12px;
-                background: rgba(255,255,255,0.1);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 6px;
-                color: #fff;
-                font-size: 13px;
-                box-sizing: border-box;
-            }
-            #fq-settings-panel .fq-settings-save {
-                width: 100%;
-                padding: 10px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border: none;
-                border-radius: 8px;
-                color: #fff;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                margin-top: 8px;
-            }
-        `;
-        document.head.appendChild(panelStyle);
+
         document.body.appendChild(panel);
-        
+
         // 绑定事件
-        document.getElementById('fq-settings-close').addEventListener('click', () => panel.remove());
-        document.getElementById('fq-settings-save').addEventListener('click', () => {
+        document.getElementById('fq-settings-close').onclick = () => panel.remove();
+        document.getElementById('fq-settings-save').onclick = () => {
             this.llmConfig.enabled = document.getElementById('fq-llm-enabled').checked;
             this.llmConfig.apiUrl = document.getElementById('fq-llm-url').value.trim();
             this.llmConfig.apiKey = document.getElementById('fq-llm-key').value.trim();
             this.llmConfig.model = document.getElementById('fq-llm-model').value.trim() || 'deepseek-v4-flash';
             this.saveConfig();
             panel.remove();
-            alert('设置已保存！');
-        });
-        
+            this.showToast('设置已保存！', 'success');
+        };
+
         // 预设选项切换
-        document.getElementById('fq-preset').addEventListener('change', (e) => {
+        document.getElementById('fq-preset').onchange = (e) => {
             const presets = {
                 'deepseek': {
                     url: 'https://api.deepseek.com/chat/completions',
@@ -797,95 +615,121 @@ ${question.question}
                     model: 'gpt-3.5-turbo'
                 }
             };
-            
+
             const preset = presets[e.target.value];
             if (preset) {
                 document.getElementById('fq-llm-url').value = preset.url;
                 document.getElementById('fq-llm-model').value = preset.model;
             }
-        });
+        };
     }
-    
-    // 渲染问题列表
+
+    /**
+     * 渲染问题列表
+     */
     renderQuestions() {
         const list = document.getElementById('fq-list');
-        list.innerHTML = this.questions.map((q, index) => `
+        const count = document.getElementById('fq-count');
+
+        count.textContent = this.data.length;
+
+        if (this.data.length === 0) {
+            list.innerHTML = '';
+            return;
+        }
+
+        list.innerHTML = this.data.map(q => `
             <div class="fq-question-item ${q.answered ? 'answered' : ''}" data-id="${q.id}">
                 <div class="fq-question-context">${this.escapeHtml(q.context)}</div>
                 <div class="fq-question-text">${this.escapeHtml(q.question)}</div>
                 ${q.answer ? `<div class="fq-answer">${this.formatAnswer(q.answer)}</div>` : ''}
                 <div class="fq-question-meta">
-                    <span>${q.timestamp}</span>
+                    <span>${new Date(q.timestamp).toLocaleString('zh-CN')}</span>
                     <span class="fq-status">${q.answered ? '✅ 已回答' : '⏳ 待回答'}</span>
                 </div>
             </div>
         `).join('');
     }
 
-    // 格式化回答（支持换行）
+    /**
+     * 格式化回答（支持换行）
+     * @param {string} answer - 回答文本
+     * @returns {string} HTML 格式的回答
+     */
     formatAnswer(answer) {
+        // 先转义 HTML，再处理换行
         return this.escapeHtml(answer).replace(/\n/g, '<br>');
     }
-    
-    // HTML 转义
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    // 导出问题
-    exportQuestions() {
-        if (this.questions.length === 0) {
-            alert('暂无问题可导出');
+
+    /**
+     * 导出问题
+     * @param {'txt'|'json'} [format='txt'] - 导出格式
+     */
+    exportQuestions(format = 'txt') {
+        if (this.data.length === 0) {
+            this.showToast('暂无问题可导出', 'warning');
             return;
         }
-        
+
         const timestamp = new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-').replace(/\s/g, '_');
-        let content, filename, mimeType;
-        
-        content = this.generateTxtContent();
-        filename = `课件问题_${timestamp}.txt`;
-        mimeType = 'text/plain';
-        
-        const blob = new Blob([content], { type: mimeType + ';charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.click();
-        URL.revokeObjectURL(url);
+
+        if (format === 'json') {
+            const jsonData = {
+                exportTime: new Date().toISOString(),
+                totalCount: this.data.length,
+                questions: this.data
+            };
+            const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `课件问题_${timestamp}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } else {
+            const content = this.generateTxtContent();
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `课件问题_${timestamp}.txt`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        this.showToast('导出成功', 'success');
     }
-    
-    // 生成文本内容
+
+    /**
+     * 生成文本内容
+     * @returns {string} 文本内容
+     */
     generateTxtContent() {
         let content = '=== 课件问题收集 ===\n\n';
         content += `导出时间: ${new Date().toLocaleString('zh-CN')}\n`;
-        content += `问题总数: ${this.questions.length}\n`;
+        content += `问题总数: ${this.data.length}\n`;
         content += '='.repeat(40) + '\n\n';
-        
-        this.questions.forEach((q, index) => {
+
+        this.data.forEach((q, index) => {
             content += `【问题 ${index + 1}】\n`;
             content += `原文摘录: ${q.context}\n`;
             content += `提问内容: ${q.question}\n`;
             if (q.answer) {
-                content += `回答内容: ${q.answer}\n`;
+                content += `回答内容: ${q.answer.replace(/<br>/g, '\n')}\n`;
             }
             content += `提问时间: ${q.timestamp}\n`;
             content += `状态: ${q.answered ? '✅ 已回答' : '⏳ 待回答'}\n`;
             content += '-'.repeat(40) + '\n\n';
         });
-        
+
         return content;
     }
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    window.floatingQuestion = new FloatingQuestionBox();
-});
-
-// 也支持直接加载
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    window.floatingQuestion = new FloatingQuestionBox();
+// 初始化 - 使用防重复初始化标志
+if (!window._floatingQuestionInitialized) {
+    window._floatingQuestionInitialized = true;
+    document.addEventListener('DOMContentLoaded', () => {
+        window.floatingQuestion = new FloatingQuestionBox();
+    });
 }

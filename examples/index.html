@@ -51,9 +51,29 @@
             overflow-x: auto;
             margin: 15px 0;
         }
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: transform 0.2s;
+            z-index: 9999;
+        }
+        .theme-toggle:hover {
+            transform: scale(1.05);
+        }
     </style>
 </head>
 <body>
+    <button class="theme-toggle" id="theme-toggle">🌓 切换主题</button>
+
     <h1>📚 Course QA System 示例课件</h1>
     <p style="color: #636e72;">这是一个演示课件，展示 course-qa-system 的三大功能模块。</p>
 
@@ -61,7 +81,8 @@
         <strong>💡 快速开始：</strong><br>
         • 选中文字 → 右键 → 选择操作（划线/笔记/提问）<br>
         • 按 <code>N</code> 键打开笔记面板<br>
-        • 按 <code>Q</code> 键打开提问面板
+        • 按 <code>Q</code> 键打开提问面板<br>
+        • 点击右上角 🌓 切换深色/浅色主题
     </div>
 
     <div class="chapter">
@@ -73,6 +94,9 @@
         <p>
             划线功能可以帮你<span class="highlight-demo">标记重点内容</span>，
             所有划线都会自动保存到浏览器本地存储中。
+        </p>
+        <p>
+            <strong>新功能：</strong>右键菜单现在支持选择划线颜色！试试选择不同的颜色。
         </p>
     </div>
 
@@ -86,6 +110,10 @@
             你可以在笔记中记录学习心得、总结要点、或者提出疑问。
             笔记支持标题、内容和上下文关联。
         </p>
+        <p>
+            <strong>新功能：</strong>笔记现在支持标签分类和全文搜索！
+            可以添加标签方便整理，也可以导出为 JSON 格式备份。
+        </p>
     </div>
 
     <div class="chapter">
@@ -98,6 +126,10 @@
             提问功能使用<span class="highlight-demo">专家视角</span>的 Prompt 设计，
             不会用"小白口吻"解释，而是保留专业术语，
             帮助学员建立真正的专业认知结构。
+        </p>
+        <p>
+            <strong>新功能：</strong>点击 ⚙️ 按钮配置你的 LLM API，
+            API Key 现在使用会话级存储，更加安全！
         </p>
     </div>
 
@@ -132,18 +164,39 @@
     </div>
 
     <!-- 引入 Course QA System 脚本 -->
+    <!-- 1. Toast 通知组件（必须首先加载） -->
+    <script src="../js/toast.js"></script>
+    <!-- 2. 公共基类 -->
+    <script src="../js/base-module.js"></script>
+    <!-- 3. 统一样式 -->
+    <link rel="stylesheet" href="../css/styles.css">
+    <!-- 4. 功能模块 -->
     <script src="../js/highlight-manager.js"></script>
     <script src="../js/note-panel.js"></script>
     <script src="../js/floating-question-box.js"></script>
 
     <script>
-        // 可选：配置 DeepSeek API
+        // 主题切换功能
         document.addEventListener('DOMContentLoaded', () => {
+            // 加载保存的主题
+            const savedTheme = localStorage.getItem('fq-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+
+            // 主题切换按钮
+            document.getElementById('theme-toggle').onclick = () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('fq-theme', newTheme);
+
+                // 通知所有模块
+                window.dispatchEvent(new CustomEvent('theme-changed', {
+                    detail: { theme: newTheme }
+                }));
+            };
+
             // 如果需要使用 DeepSeek 提问功能，请配置 API Key
-            // window.floatingQuestion = new FloatingQuestionBox({
-            //     defaultModel: 'deepseek-v4-flash',
-            //     storageKey: 'fq-questions'
-            // });
+            // window.floatingQuestion.showSettings();
         });
     </script>
 </body>

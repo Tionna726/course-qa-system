@@ -1,64 +1,97 @@
 /**
- * 划线管理器 - Highlight Manager v2.0
+ * 划线管理器 - Highlight Manager v2.1
  *
  * 功能：
- * - 划线高亮显示
+ * - 划线高亮显示（支持多种颜色）
  * - 保存到本地存储
- * - 自动关联到笔记
- * - 支持全文检索
+ * - 事件驱动与其他组件通信
+ * - CustomEvent 解耦
+ *
+ * 安全修复：
+ * - 所有文本使用 escapeHtml 转义
+ * - 使用 CustomEvent 替代全局变量直接访问
+ * - 错误处理添加 Toast 通知
  */
 
-class HighlightManager {
+/**
+ * 划线管理器类
+ * @class
+ */
+class HighlightManager extends BaseModule {
+    /**
+     * @param {Object} options - 配置选项
+     * @param {string} [options.color='#ffeaa7'] - 默认高亮颜色
+     * @param {string} [options.hoverColor='#f9ca24'] - 悬停颜色
+     * @param {string} [options.activeColor='#fd79a8'] - 激活颜色
+     * @param {string} [options.storageKey='fq-highlights'] - 存储键
+     */
     constructor(options = {}) {
-        this.options = {
-            color: '#ffeaa7',           // 默认高亮颜色
-            hoverColor: '#f9ca24',      // 悬停高亮颜色
-            activeColor: '#fd79a8',     // 激活高亮颜色
+        super({
             storageKey: 'fq-highlights',
-            autoSave: true,             // 自动保存到笔记
             ...options
+        });
+
+        /** @type {string} 当前划线颜色 */
+        this.currentColor = options.color || '#ffeaa7';
+        /** @type {Object} 划线颜色映射 */
+        this.colorMap = {
+            yellow: { main: '#ffeaa7', hover: '#f9ca24' },
+            pink: { main: '#fd79a8', hover: '#ff6b9d' },
+            green: { main: '#55efc4', hover: '#00cec9' },
+            blue: { main: '#74b9ff', hover: '#0984e3' },
+            orange: { main: '#fdcb6e', hover: '#f9a825' }
         };
 
-        this.highlights = [];
-        this.loadHighlights();
+        this.loadData();
         this.init();
     }
 
-    // 初始化
+    /**
+     * 初始化
+     */
     init() {
         this.setupSelectionListener();
-        this.setupContextMenu();
         this.renderHighlights();
         this.injectStyles();
+        this.setupEventListeners();
+        this.applyTheme();
     }
 
-    // 加载保存的划线
-    loadHighlights() {
-        try {
-            const saved = localStorage.getItem(this.options.storageKey);
-            if (saved) {
-                this.highlights = JSON.parse(saved);
-            }
-        } catch (e) {
-            console.error('加载划线失败:', e);
-            this.highlights = [];
+    /**
+     * 设置事件监听（接收其他组件事件）
+     */
+    setupEventListeners() {
+        // 监听主题切换
+        window.addEventListener('theme-changed', (e) => {
+            this.applyTheme(e.detail?.theme);
+        });
+    }
+
+    /**
+     * 应用主题
+     * @param {string} [theme] - 主题名称
+     */
+    applyTheme(theme) {
+        const currentTheme = theme || this.loadTheme();
+        // 划线颜色适配浅色主题
+        if (currentTheme === 'light') {
+            this.colorMap.yellow.main = '#fff3cd';
+            this.colorMap.yellow.hover = '#ffeeba';
+        } else {
+            this.colorMap.yellow.main = '#ffeaa7';
+            this.colorMap.yellow.hover = '#f9ca24';
         }
     }
 
-    // 保存划线
-    saveHighlights() {
-        try {
-            localStorage.setItem(this.options.storageKey, JSON.stringify(this.highlights));
-        } catch (e) {
-            console.error('保存划线失败:', e);
-        }
-    }
-
-    // 设置选择监听
+    /**
+     * 设置选择监听
+     */
     setupSelectionListener() {
         document.addEventListener('mouseup', (e) => {
-            // 忽略按钮点击
+            // 忽略按钮点击和面板内点击
             if (e.target.closest('button')) return;
+            if (e.target.closest('#hm-context-menu')) return;
+            if (e.target.closest('.fq-panel')) return;
 
             const selection = window.getSelection();
             const selectedText = selection.toString().trim();
@@ -76,12 +109,26 @@ class HighlightManager {
         });
     }
 
-    // 显示右键菜单
+    /**
+     * 显示右键菜单
+     * @param {MouseEvent} e - 鼠标事件
+     * @param {string} text - 选中文本
+     */
     showContextMenu(e, text) {
         this.hideContextMenu();
 
         const menu = document.createElement('div');
         menu.id = 'hm-context-menu';
+
+        // 构建颜色选择 HTML
+        const colorOptions = Object.keys(this.colorMap).map(color => `
+            <div class="hm-color-option ${color === 'yellow' ? 'selected' : ''}"
+                 data-color="${color}"
+                 style="background: ${this.colorMap[color].main}"
+                 title="${color}">
+            </div>
+        `).join('');
+
         menu.innerHTML = `
             <div class="hm-menu-item" data-action="highlight">
                 <span class="hm-menu-icon">🖍️</span>
@@ -95,10 +142,16 @@ class HighlightManager {
                 <span class="hm-menu-icon">❓</span>
                 <span>划线提问</span>
             </div>
+            <div class="hm-color-picker">
+                ${colorOptions}
+            </div>
         `;
 
         this.positionMenu(menu, e.clientX, e.clientY);
         document.body.appendChild(menu);
+
+        // 存储当前选中文本
+        this._currentSelectedText = text;
 
         // 绑定菜单项事件
         menu.querySelector('[data-action="highlight"]').addEventListener('click', () => {
@@ -115,48 +168,87 @@ class HighlightManager {
             this.createHighlightWithQuestion(text);
             this.hideContextMenu();
         });
+
+        // 绑定颜色选择事件
+        menu.querySelectorAll('.hm-color-option').forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const color = option.dataset.color;
+                this.currentColor = this.colorMap[color].main;
+                this._selectedColor = color;
+
+                // 更新选中状态
+                menu.querySelectorAll('.hm-color-option').forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+            });
+        });
     }
 
-    // 定位菜单
+    /**
+     * 定位菜单
+     * @param {HTMLElement} menu - 菜单元素
+     * @param {number} x - X坐标
+     * @param {number} y - Y坐标
+     */
     positionMenu(menu, x, y) {
         const menuRect = menu.getBoundingClientRect();
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
-        // 调整位置避免超出屏幕
         let posX = x;
         let posY = y;
 
-        if (x + 160 > viewportWidth) {
-            posX = viewportWidth - 170;
+        if (x + 170 > viewportWidth) {
+            posX = viewportWidth - 180;
         }
-        if (y + 120 > viewportHeight) {
-            posY = viewportHeight - 130;
+        if (y + 160 > viewportHeight) {
+            posY = viewportHeight - 170;
         }
 
         menu.style.cssText = `
             position: fixed;
             left: ${posX}px;
             top: ${posY}px;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border-radius: 10px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            background: var(--fq-bg-primary);
+            border-radius: var(--fq-radius-lg);
+            box-shadow: 0 4px 20px var(--fq-shadow);
             padding: 6px;
             z-index: 10001;
             min-width: 160px;
         `;
     }
 
-    // 隐藏菜单
+    /**
+     * 隐藏菜单
+     */
     hideContextMenu() {
         const menu = document.getElementById('hm-context-menu');
         if (menu) menu.remove();
+        this._currentSelectedText = null;
+        this._selectedColor = null;
     }
 
-    // 创建划线
+    /**
+     * 创建划线
+     * @param {string} text - 划线文本
+     * @param {Object} [metadata={}] - 元数据
+     * @param {string} [metadata.note] - 笔记内容
+     */
     createHighlight(text, metadata = {}) {
         const selection = window.getSelection();
-        if (!selection.rangeCount) return;
+        
+        // 使用保存的文本（优先）或当前选区
+        const highlightText = text || this._currentSelectedText;
+        if (!highlightText) {
+            this.showToast('请先选中要划线的文本', 'warning');
+            return;
+        }
+
+        // 如果没有选区，尝试从保存的文本重新选中
+        if (!selection.rangeCount) {
+            this.showToast('选区已失效，请重新选中文本', 'warning');
+            return;
+        }
 
         const range = selection.getRangeAt(0);
         const container = range.commonAncestorContainer;
@@ -164,7 +256,6 @@ class HighlightManager {
 
         // 检查是否已经在高亮中
         if (parentElement.classList.contains('hm-highlight')) {
-            // 移除高亮
             this.removeHighlight(parentElement);
             return;
         }
@@ -175,67 +266,92 @@ class HighlightManager {
         // 创建高亮元素
         const span = document.createElement('span');
         span.className = 'hm-highlight';
-        span.dataset.id = Date.now();
-        span.dataset.text = text;
+        const id = this.generateId();
+        span.dataset.id = id;
+        span.dataset.text = highlightText;
         span.dataset.page = pageInfo.title;
         span.dataset.url = pageInfo.url;
         span.dataset.timestamp = new Date().toISOString();
         span.dataset.note = metadata.note || '';
+        span.dataset.color = this._selectedColor || 'yellow';
 
         try {
             range.surroundContents(span);
         } catch (e) {
             // 跨多个元素的情况
-            const documentFragment = range.extractContents();
-            span.appendChild(documentFragment);
-            range.insertNode(span);
+            try {
+                const documentFragment = range.extractContents();
+                span.appendChild(documentFragment);
+                range.insertNode(span);
+            } catch (innerError) {
+                this.showToast('划线失败：文本结构不支持', 'error');
+                console.error('[HighlightManager] surroundContents error:', innerError);
+                return;
+            }
         }
 
         // 保存到列表
-        this.highlights.push({
-            id: span.dataset.id,
-            text: text,
+        const highlight = {
+            id: id,
+            text: highlightText,
             page: pageInfo.title,
             url: pageInfo.url,
             timestamp: span.dataset.timestamp,
             note: metadata.note || '',
-            color: this.options.color
-        });
+            color: this._selectedColor || 'yellow'
+        };
 
-        this.saveHighlights();
+        this.data.push(highlight);
+        this.saveData();
 
         // 触发事件（用于其他组件监听）
         window.dispatchEvent(new CustomEvent('highlight-created', {
-            detail: { highlight: this.highlights[this.highlights.length - 1] }
+            detail: { highlight: highlight }
         }));
+
+        this.showToast('划线已保存', 'success');
     }
 
-    // 创建划线+笔记
+    /**
+     * 创建划线+笔记
+     * @param {string} text - 划线文本
+     */
     createHighlightWithNote(text) {
         const note = prompt('添加笔记（可选）：');
         this.createHighlight(text, { note: note || '' });
 
-        // 如果有笔记，同步到笔记面板
-        if (note && window.notePanel) {
-            window.notePanel.addNote({
-                content: note,
-                context: text,
-                type: 'highlight-note'
-            });
+        // 使用 CustomEvent 通知笔记面板
+        if (note) {
+            window.dispatchEvent(new CustomEvent('highlight-with-note', {
+                detail: {
+                    text: text,
+                    note: note,
+                    timestamp: new Date().toISOString()
+                }
+            }));
         }
     }
 
-    // 创建划线+提问
+    /**
+     * 创建划线+提问
+     * @param {string} text - 划线文本
+     */
     createHighlightWithQuestion(text) {
         this.createHighlight(text);
 
-        // 打开提问面板
-        if (window.floatingQuestion) {
-            window.floatingQuestion.showNewQuestion(text);
-        }
+        // 使用 CustomEvent 通知提问面板
+        window.dispatchEvent(new CustomEvent('highlight-with-question', {
+            detail: {
+                text: text,
+                timestamp: new Date().toISOString()
+            }
+        }));
     }
 
-    // 移除划线
+    /**
+     * 移除划线
+     * @param {HTMLElement} element - 划线元素
+     */
     removeHighlight(element) {
         const id = element.dataset.id;
         const parent = element.parentNode;
@@ -247,18 +363,21 @@ class HighlightManager {
         parent.removeChild(element);
 
         // 从列表移除
-        this.highlights = this.highlights.filter(h => h.id !== id);
-        this.saveHighlights();
+        this.data = this.data.filter(h => h.id !== id);
+        this.saveData();
+        this.showToast('划线已移除', 'info');
     }
 
-    // 渲染页面上的划线
+    /**
+     * 渲染页面上的划线
+     */
     renderHighlights() {
         // 清除现有渲染
         document.querySelectorAll('.hm-highlight').forEach(el => el.remove());
 
         const pageInfo = this.getPageInfo();
 
-        this.highlights.forEach(h => {
+        this.data.forEach(h => {
             // 只渲染当前页面的划线
             if (h.url === pageInfo.url || h.page === pageInfo.title) {
                 this.renderHighlightInPage(h);
@@ -266,7 +385,10 @@ class HighlightManager {
         });
     }
 
-    // 在页面中渲染单个划线
+    /**
+     * 在页面中渲染单个划线
+     * @param {Object} highlight - 划线数据
+     */
     renderHighlightInPage(highlight) {
         const walker = document.createTreeWalker(
             document.body,
@@ -289,6 +411,7 @@ class HighlightManager {
                 span.className = 'hm-highlight';
                 span.dataset.id = highlight.id;
                 span.dataset.note = highlight.note;
+                span.dataset.color = highlight.color;
 
                 try {
                     range.surroundContents(span);
@@ -300,7 +423,10 @@ class HighlightManager {
         }
     }
 
-    // 获取页面信息
+    /**
+     * 获取页面信息
+     * @returns {Object} 页面信息
+     */
     getPageInfo() {
         return {
             title: document.title || '未命名页面',
@@ -309,121 +435,122 @@ class HighlightManager {
         };
     }
 
-    // 获取所有划线
+    /**
+     * 获取所有划线
+     * @returns {Object[]} 划线列表
+     */
     getAllHighlights() {
-        return this.highlights;
+        return this.data;
     }
 
-    // 搜索划线
+    /**
+     * 搜索划线
+     * @param {string} query - 搜索关键词
+     * @returns {Object[]} 匹配结果
+     */
     searchHighlights(query) {
-        const lowerQuery = query.toLowerCase();
-        return this.highlights.filter(h =>
-            h.text.toLowerCase().includes(lowerQuery) ||
-            h.note.toLowerCase().includes(lowerQuery) ||
-            h.page.toLowerCase().includes(lowerQuery)
-        );
+        return this.search(query, ['text', 'note', 'page']);
     }
 
-    // 更新划线笔记
+    /**
+     * 更新划线笔记
+     * @param {string} id - 划线ID
+     * @param {string} note - 新笔记内容
+     */
     updateHighlightNote(id, note) {
-        const highlight = this.highlights.find(h => h.id === id);
+        const highlight = this.data.find(h => h.id === id);
         if (highlight) {
             highlight.note = note;
-            this.saveHighlights();
+            this.saveData();
 
             // 更新页面元素
             const element = document.querySelector(`.hm-highlight[data-id="${id}"]`);
             if (element) {
                 element.dataset.note = note;
             }
+            this.showToast('笔记已更新', 'success');
         }
     }
 
-    // 导出划线
+    /**
+     * 导出划线
+     * @returns {Object} 导出数据
+     */
     exportHighlights() {
         return {
             exportTime: new Date().toISOString(),
             page: this.getPageInfo(),
-            highlights: this.highlights
+            highlights: this.data
         };
     }
 
-    // 注入样式
+    /**
+     * 注入样式（仅包含右键菜单相关样式，划线样式由 css/styles.css 提供）
+     */
     injectStyles() {
         if (document.getElementById('hm-styles')) return;
 
         const style = document.createElement('style');
         style.id = 'hm-styles';
         style.textContent = `
-            .hm-highlight {
-                background: ${this.options.color};
-                background-size: 100% 40%;
-                background-repeat: no-repeat;
-                background-position: 0 90%;
-                padding: 2px 0;
-                border-radius: 2px;
-                cursor: pointer;
-                transition: background 0.3s;
-                position: relative;
-            }
-
-            .hm-highlight:hover {
-                background: ${this.options.hoverColor};
-            }
-
-            .hm-highlight.active {
-                background: ${this.options.activeColor};
-            }
-
-            /* 悬停显示笔记 */
-            .hm-highlight[data-note]:hover::after {
-                content: attr(data-note);
-                position: absolute;
-                bottom: 100%;
-                left: 0;
-                background: #1a1a2e;
-                color: #fff;
-                padding: 6px 10px;
-                border-radius: 6px;
-                font-size: 12px;
-                white-space: nowrap;
-                max-width: 300px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                z-index: 1000;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            }
-
             /* 右键菜单样式 */
             #hm-context-menu {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             }
-
+            
             .hm-menu-item {
                 display: flex;
                 align-items: center;
                 gap: 10px;
                 padding: 10px 14px;
-                color: #fff;
+                color: var(--fq-text-primary);
                 font-size: 13px;
                 border-radius: 8px;
                 cursor: pointer;
                 transition: background 0.2s;
             }
-
+            
             .hm-menu-item:hover {
-                background: rgba(255,255,255,0.1);
+                background: var(--fq-border-hover);
             }
-
+            
             .hm-menu-icon {
                 font-size: 16px;
+            }
+            
+            .hm-color-picker {
+                display: flex;
+                gap: 6px;
+                padding: 8px 14px;
+                border-top: 1px solid var(--fq-border);
+                margin-top: 4px;
+            }
+            
+            .hm-color-option {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                cursor: pointer;
+                border: 2px solid transparent;
+                transition: transform 0.2s, border-color 0.2s;
+            }
+            
+            .hm-color-option:hover {
+                transform: scale(1.2);
+            }
+            
+            .hm-color-option.selected {
+                border-color: var(--fq-text-primary);
             }
         `;
         document.head.appendChild(style);
     }
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    window.highlightManager = new HighlightManager();
-});
+// 初始化 - 使用防重复初始化标志
+if (!window._highlightManagerInitialized) {
+    window._highlightManagerInitialized = true;
+    document.addEventListener('DOMContentLoaded', () => {
+        window.highlightManager = new HighlightManager();
+    });
+}
